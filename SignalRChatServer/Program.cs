@@ -19,15 +19,15 @@ public class Program
         // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
         builder.Services.AddDbContext<ChatContext>(options =>
         {
-            options.UseSqlServer(builder.Configuration.GetConnectionString("ChatDbConnection"));
+            options.UseSqlServer(builder.Configuration["ChatDbConnection"]);
         });
         builder.Services.AddEndpointsApiExplorer();
         builder.Services.AddSwaggerGen();
 
         builder.WebHost.ConfigureKestrel(options =>
         {
-            options.ListenAnyIP(5274);
-            options.ListenAnyIP(7152, listenOptions =>
+            options.ListenAnyIP(5065);
+            options.ListenAnyIP(7174, listenOptions =>
             {
                 listenOptions.UseHttps();
             });
