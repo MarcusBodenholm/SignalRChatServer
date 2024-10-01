@@ -23,7 +23,7 @@ public class Program
         });
         builder.Services.AddEndpointsApiExplorer();
         builder.Services.AddSwaggerGen();
-
+        builder.Services.ConfigureServices();
         builder.WebHost.ConfigureKestrel(options =>
         {
             options.ListenAnyIP(5065);
@@ -42,7 +42,7 @@ public class Program
             app.UseSwagger();
             app.UseSwaggerUI();
         }
-
+        app.UseCors(x => x.AllowAnyHeader().AllowAnyOrigin().AllowAnyMethod());
         app.UseHttpsRedirection();
         app.UseAuthentication();
         app.UseAuthorization();

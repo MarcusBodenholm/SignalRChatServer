@@ -12,9 +12,9 @@ public class AuthController : Controller
     private readonly ChatContext _context;
     private readonly IConfiguration _config;
     private readonly IAuthServices _authService;
-    private readonly ILogger _logger;
+    private readonly ILogger<AuthController> _logger;
 
-    public AuthController(ChatContext context, IConfiguration config, IAuthServices authServices, ILogger logger)
+    public AuthController(ChatContext context, IConfiguration config, IAuthServices authServices, ILogger<AuthController> logger)
     {
         _context = context;
         _config = config;
@@ -33,12 +33,18 @@ public class AuthController : Controller
 
                 return BadRequest(new { message = "Passwords do not match" });
             }
+            bool userExists = _context.Users.Any(u => u.Username == userDto.Username);
+            if (userExists)
+            {
+                _logger.LogInformation($"User signup failed due to username already in use.");
+                return BadRequest(new { message = "Username is already in use." });
+                }
             var hashedPassword = BCrypt.Net.BCrypt.HashPassword(userDto.Password);
             var user = new User { Username = userDto.Username, PasswordHash = hashedPassword };
             _context.Users.Add(user);
             await _context.SaveChangesAsync();
             _logger.LogInformation("User signup successful.");
-            return Ok("User registered successfully.");
+            return Ok(new { message = "User registered successfully" });
 
         }
         catch (Exception ex)
@@ -65,7 +71,7 @@ public class AuthController : Controller
             var secretKey = _config["SecretKey"];
             var token = _authService.GenerateJwtToken(user, secretKey);
             _logger.LogInformation("Login successful");
-            return Ok(new { Token = token });
+            return Ok(new { token });
 
         }
         catch (Exception ex)
