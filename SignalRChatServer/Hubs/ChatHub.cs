@@ -1,10 +1,12 @@
-﻿using Microsoft.AspNetCore.SignalR;
+﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.EntityFrameworkCore;
 using SignalRChatServer.Infrastructure.Context;
 using SignalRChatServer.Infrastructure.Models;
 
 namespace SignalRChatServer.API.Hubs;
 
+[Authorize]
 public class ChatHub : Hub
 {
     //TODO: Fixa till hela denna sektionen. 
@@ -36,5 +38,12 @@ public class ChatHub : Hub
 
         await Clients.Group(groupName).SendAsync("Send");
     }
-
+    public async Task AddToGroup(string groupName)
+    {
+        await Groups.AddToGroupAsync(Context.ConnectionId, groupName);
+    }
+    public async Task RemoveFromGroup(string groupName)
+    {
+        await Groups.RemoveFromGroupAsync(Context.ConnectionId, groupName);
+    }
 }
