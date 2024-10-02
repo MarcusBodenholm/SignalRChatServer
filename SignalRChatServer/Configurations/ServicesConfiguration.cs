@@ -10,6 +10,7 @@ public static class ServicesConfiguration
     public static void ConfigureServices(this IServiceCollection services)
     {
         services.AddScoped<IAuthServices, AuthServices>();
+        services.AddSingleton<ChatService>();
         services.AddLogging();
     }
     public static void ConfigureAuthentication(this IServiceCollection services)

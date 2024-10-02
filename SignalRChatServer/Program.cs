@@ -23,6 +23,16 @@ public class Program
         });
         builder.Services.AddEndpointsApiExplorer();
         builder.Services.AddSwaggerGen();
+        builder.Services.AddCors(options =>
+        {
+            options.AddPolicy("reactClient", builder =>
+            {
+                builder.WithOrigins("http://localhost:5173")
+                .AllowAnyHeader()
+                .AllowAnyMethod()
+                .AllowCredentials();
+            });
+        });
         builder.Services.ConfigureServices();
         builder.WebHost.ConfigureKestrel(options =>
         {
@@ -42,7 +52,7 @@ public class Program
             app.UseSwagger();
             app.UseSwaggerUI();
         }
-        app.UseCors(x => x.AllowAnyHeader().AllowAnyOrigin().AllowAnyMethod());
+        app.UseCors("reactClient");
         app.UseHttpsRedirection();
         app.UseAuthentication();
         app.UseAuthorization();

@@ -14,16 +14,43 @@ public class ChatMessageDto
     public required string Message { get; set; }
     public required string Room { get; set; }
 }
+public class GroupMessageDto
+{
+    public required string Username { get; set; }
+    public required string Message { get; set; }
+    public required string Room { get; set; }
+    public required DateTime TimeStamp { get; set; }
+
+
+}
+public class PrivateMessageDto
+{
+    public required string Username { get; set; }
+    public required string Message { get; set; }
+    public required DateTime TimeStamp { get; set; }
+
+}
+
 
 public static class Mapper
 {
-    public static List<ChatMessageDto> MapToChatMessageDto(List<ChatMessage> messages)
+    public static List<GroupMessageDto> MapToGroupMessageDto(List<ChatMessage> messages)
     {
         var result = messages.Select(m =>
         {
-            var message = new ChatMessageDto { Message = m.Message, Room = m.Group.Name, Username = m.User.Username };
+            var message = new GroupMessageDto { Message = m.Message, Room = m.Group.Name, Username = m.User.Username, TimeStamp = m.Timestamp };
             return message;
         }).ToList();
         return result;
     }
+    public static List<PrivateMessageDto> MapToPrivateMessageDto(List<ChatMessage> messages)
+    {
+        var result = messages.Select(m =>
+        {
+            var message = new PrivateMessageDto { Message = m.Message, TimeStamp = m.Timestamp, Username = m.User.Username };
+            return message;
+        }).ToList();
+        return result;
+    }
+
 }

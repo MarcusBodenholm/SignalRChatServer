@@ -41,7 +41,9 @@ public class AuthController : Controller
                 }
             var hashedPassword = BCrypt.Net.BCrypt.HashPassword(userDto.Password);
             var user = new User { Username = userDto.Username, PasswordHash = hashedPassword };
+            var group = await _context.Groups.SingleOrDefaultAsync(g => g.Name == "Lobby");
             _context.Users.Add(user);
+            group.Users.Add(user);
             await _context.SaveChangesAsync();
             _logger.LogInformation("User signup successful.");
             return Ok(new { message = "User registered successfully" });

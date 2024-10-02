@@ -56,7 +56,7 @@ public class ChatController : Controller
     public async Task<IActionResult> GetChatRoomMessages(string chatroomname)
     {
         var messages = await _context.Messages.Include(m => m.Group).Include(m => m.User).Where(m => m.Group.Name == chatroomname).ToListAsync();
-        var result = Mapper.MapToChatMessageDto(messages);
+        var result = Mapper.MapToGroupMessageDto(messages);
         return Ok(result);
     }
     [HttpPost("addchatmessage")]
