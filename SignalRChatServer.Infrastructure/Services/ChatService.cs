@@ -55,4 +55,9 @@ public class ChatService
     {
         return _currentUsers[connectionId];
     }
+    public string GetConnectionIdForUser(string user)
+    {
+        var kvp = _currentUsers.SingleOrDefault(kvp => kvp.Value == user);
+        return kvp.Key;
+    }
 }

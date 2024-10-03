@@ -5,6 +5,7 @@ using SignalRChatServer.Infrastructure.Context;
 using SignalRChatServer.Infrastructure.DTOs;
 using SignalRChatServer.Infrastructure.Models;
 using SignalRChatServer.Infrastructure.Services;
+using System.Text.Json;
 
 namespace SignalRChatServer.API.Hubs;
 [Authorize]
@@ -30,6 +31,7 @@ public class ChatHub : Hub
         }
         _chatService.AddConnectionId(Context.ConnectionId, name);
         await Groups.AddToGroupAsync(Context.ConnectionId, _chatService.GetGroupForConnectionId(Context.ConnectionId));
+        await Groups.AddToGroupAsync(Context.ConnectionId, name);
         await SendExistingGroupMessages("Lobby");
         await base.OnConnectedAsync();
     }
@@ -131,6 +133,7 @@ public class ChatHub : Hub
         group.Users.Add(user);
         await _context.SaveChangesAsync();
         await SendGroupMessage($"{currentUser} has added {username} to the room.", groupName);
+        await Clients.Group(username).SendAsync("ReceiveGroup", new {name = group.Name, owner = group.Owner });
 
     }
     public async Task SendGroupMessage(string message, string groupName)
@@ -150,8 +153,9 @@ public class ChatHub : Hub
             Group = group,
         };
         _context.Messages.Add(chatMessage);
+        var chatMessageDto = new GroupMessageDto { Message = chatMessage.Message, Room = chatMessage.Group.Name, Username = chatMessage.User.Username, TimeStamp = chatMessage.Timestamp };
         await _context.SaveChangesAsync();
-        await Clients.Group(groupName).SendAsync("ReceiveGroupMessage", user.Username, message);
+        await Clients.Group(groupName).SendAsync("ReceiveGroupMessage", chatMessageDto);
 
     }
 
@@ -177,8 +181,31 @@ public class ChatHub : Hub
         var messages = Mapper.MapToGroupMessageDto(rawMessages);
         foreach (var message in messages)
         {
-            await Clients.Caller.SendAsync("ReceiveGroupMessage", message.Username, message.Message);
+            await Clients.Caller.SendAsync("ReceiveGroupMessage", message);
         }
 
+    }
+    public async Task DeleteGroup(string groupName)
+    {
+        var currentUser = Context.User?.Identity?.Name;
+        var group = await _context.Groups.Include(g => g.Users).SingleOrDefaultAsync(g => g.Name == groupName);
+        if (currentUser == null || group == null)
+        {
+            await Clients.Caller.SendAsync("ReceiveMessage", "System", "Group does not exist or...you don't.");
+            return;
+        }
+        var messages = await _context.Messages.Include(m => m.Group).Where(m => m.Group == group).ToListAsync();
+        foreach (var message in messages)
+        {
+            message.Group = null;
+        }
+        var users = group.Users.Select(u => u.Username).ToList();
+        group.Users.Clear();
+        _context.Groups.Remove(group);
+        await _context.SaveChangesAsync();
+        foreach (var user in users)
+        {
+            await Clients.Group(user).SendAsync("GroupGone", groupName);
+        }
     }
 }

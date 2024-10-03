@@ -24,7 +24,7 @@ public class ChatController : Controller
         {
             var user = await _context.Users.Include(u => u.Groups)
                 .Where(u => u.Username == username).SingleOrDefaultAsync();
-            var result = user.Groups.Select(g => g.Name).ToList();
+            var result = user.Groups.Select(g => new {name = g.Name, owner = g.Owner}).ToList();
             return Ok(result);
         }
         catch (Exception ex)
