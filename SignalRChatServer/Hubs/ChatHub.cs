@@ -14,11 +14,13 @@ public class ChatHub : Hub
     //TODO: Fixa till hela denna sektionen. 
     private readonly ChatContext _context;
     private readonly ChatService _chatService;
+    private readonly ChatInMemory _chatInMemory;
 
-    public ChatHub(ChatContext context, ChatService chatService)
+    public ChatHub(ChatContext context, ChatService chatService, ChatInMemory chatInMemory)
     {
         _context = context;
         _chatService = chatService;
+        _chatInMemory = chatInMemory;
     }
 
     public override async Task OnConnectedAsync()
@@ -29,11 +31,16 @@ public class ChatHub : Hub
             await Clients.Caller.SendAsync("ReceiveMessage", "System", "You are not authorized.");
             return;
         }
-        _chatService.AddConnectionId(Context.ConnectionId, name);
-        await Groups.AddToGroupAsync(Context.ConnectionId, _chatService.GetGroupForConnectionId(Context.ConnectionId));
+        _chatInMemory.AddConnectionId(Context.ConnectionId, name);
+        await Groups.AddToGroupAsync(Context.ConnectionId, _chatInMemory.GetGroupForConnectionId(Context.ConnectionId));
         await Groups.AddToGroupAsync(Context.ConnectionId, name);
-        await SendExistingGroupMessages("Lobby");
+        await SendInitialPayload(name);
         await base.OnConnectedAsync();
+    }
+    public override async Task OnDisconnectedAsync(Exception? exception)
+    {
+        _chatInMemory.RemoveConnectionId(Context.ConnectionId);
+        await base.OnDisconnectedAsync(exception);
     }
     public async Task Post(string message, string groupName, string userName)
     {
@@ -62,13 +69,20 @@ public class ChatHub : Hub
             await _context.SaveChangesAsync();
         }
         var rawMessages = await _context.Messages.Include(m => m.User).Include(m => m.Conversation)
-            .Where(m => m.Conversation.Id == conversation.Id)
+            .Where(m => m.Conversation != null && m.Conversation.Id == conversation.Id)
             .OrderBy(m => m.Timestamp)
             .ToListAsync();
+        await Groups.AddToGroupAsync(Context.ConnectionId, conversation.Id.ToString());
         var messages = Mapper.MapToPrivateMessageDto(rawMessages);
-
-        await Clients.Caller.SendAsync("OpenPrivateChat", conversation.Id, target, messages);
-        await Clients.Caller.SendAsync("OpenPrivateChat", conversation.Id, currentUser, messages);
+        var payload = new {messages, id = conversation.Id, participant1 = conversation.Participant1, participant2 = conversation.Participant2};
+        await Groups.AddToGroupAsync(Context.ConnectionId, conversation.Id.ToString());
+        var targetConnId = _chatInMemory.GetConnectionIdForUser(target);
+        if (targetConnId != null)
+        {
+            await Groups.AddToGroupAsync(targetConnId, conversation.Id.ToString());
+        }
+        await Clients.Caller.SendAsync("OpenPrivateChat", payload);
+        await Clients.Group(target).SendAsync("OpenPrivateChat", payload);
     }
     public async Task SendPrivateMessage(Guid conversationId, string message)
     {
@@ -78,10 +92,11 @@ public class ChatHub : Hub
         var users = _context.Users.ToList();
         var conversation = await _context.Conversations
             .Include(c => c.ChatMessages)
-            .SingleOrDefaultAsync(c => c.Id == conversationId);
+            .Where(c => c.Id == conversationId)
+            .SingleOrDefaultAsync();
         if (conversation == null || user == null)
         {
-            await Clients.Caller.SendAsync("ReceiveError", "System", "Target user does not exist0");
+            await Clients.Caller.SendAsync("ReceiveError", "System", "Target user does not exist");
             return;
 
         }
@@ -95,8 +110,7 @@ public class ChatHub : Hub
         _context.Messages.Add(chatMessage);
         await _context.SaveChangesAsync();
 
-        await Clients.Users(conversation.Participant1).SendAsync("ReceivePrivateMessage", conversation.Id, currentUser, message);
-        await Clients.Users(conversation.Participant2).SendAsync("ReceivePrivateMessage", conversation.Id, currentUser, message);
+        await Clients.Group(conversationId.ToString()).SendAsync("ReceivePrivateMessage", new { Username = chatMessage.User.Username, message = chatMessage.Message, TimeStamp = chatMessage.Timestamp });
 
     }
     public async Task StartGroup(string groupName)
@@ -134,6 +148,7 @@ public class ChatHub : Hub
         await _context.SaveChangesAsync();
         await SendGroupMessage($"{currentUser} has added {username} to the room.", groupName);
         await Clients.Group(username).SendAsync("ReceiveGroup", new {name = group.Name, owner = group.Owner });
+        await UpdateListOfUsersForGroupClients(groupName);
 
     }
     public async Task SendGroupMessage(string message, string groupName)
@@ -161,17 +176,18 @@ public class ChatHub : Hub
 
     public async Task SwitchGroup(string newGroup)
     {
-        var oldGroup = _chatService.GetGroupForConnectionId(Context.ConnectionId);
+        var oldGroup = _chatInMemory.GetGroupForConnectionId(Context.ConnectionId);
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, oldGroup);
-        _chatService.UpdateConnectionId(Context.ConnectionId, newGroup);
+        _chatInMemory.UpdateConnectionId(Context.ConnectionId, newGroup);
         await Groups.AddToGroupAsync(Context.ConnectionId, newGroup);
-        await SendExistingGroupMessages(newGroup);
+        await SendGroupDetails(newGroup);
+        await UpdateListOfUsersForGroupClients(newGroup, oldGroup);
     }
     public async Task RemoveFromGroup(string groupName)
     {
         await Groups.RemoveFromGroupAsync(Context.ConnectionId, groupName);
     }
-    public async Task SendExistingGroupMessages(string group)
+    public async Task SendGroupDetails(string group)
     {
         var rawMessages = _context.Messages.Include(m => m.Group)
             .Include(m => m.User)
@@ -179,11 +195,8 @@ public class ChatHub : Hub
             .OrderBy(m => m.Timestamp)
             .ToList();
         var messages = Mapper.MapToGroupMessageDto(rawMessages);
-        foreach (var message in messages)
-        {
-            await Clients.Caller.SendAsync("ReceiveGroupMessage", message);
-        }
-
+        var groupUsers = await _chatService.GetGroupUsers(group);
+        await Clients.Caller.SendAsync("SwitchGroupInfo", new { messages, groupUsers });
     }
     public async Task DeleteGroup(string groupName)
     {
@@ -208,4 +221,28 @@ public class ChatHub : Hub
             await Clients.Group(user).SendAsync("GroupGone", groupName);
         }
     }
+    public async Task SendInitialPayload(string user)
+    {
+
+        var messages = await _chatService.GetGroupMessages("Lobby");
+        var groupUsers = await _chatService.GetGroupUsers("Lobby");
+        var groups = await _chatService.GetUsersGroups(user);
+        var privateChats = await _chatService.GetUserPrivateChats(user);
+        await Clients.Caller.SendAsync("InitialPayload", new { messages, groupUsers, groups, privateChats });
+        await UpdateListOfUsersForGroupClients("Lobby");
+    }
+    public async Task UpdateListOfUsersForGroupClients(string groupName, string oldGroup = "")
+    {
+        var groupUsers = await _chatService.GetGroupUsers(groupName);
+        
+        if (oldGroup != "")
+        {
+            //If oldGroup is defined, update everyone in the old group. 
+            var oldGroupUsers = await _chatService.GetGroupUsers(oldGroup);
+            await Clients.Group(oldGroup).SendAsync("UpdateListOfUsers", oldGroupUsers);
+
+        }
+        await Clients.Group(groupName).SendAsync("UpdateListOfUsers", groupUsers);
+    }
+
 }
