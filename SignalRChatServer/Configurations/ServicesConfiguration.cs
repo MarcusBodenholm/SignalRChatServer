@@ -8,6 +8,7 @@ namespace SignalRChatServer.API.Configurations;
 
 public static class ServicesConfiguration
 {
+    //Konfigurerar upp dependency injection för appen. 
     public static void ConfigureServices(this IServiceCollection services)
     {
         services.AddScoped<IAuthServices, AuthServices>();
@@ -15,6 +16,8 @@ public static class ServicesConfiguration
         services.AddSingleton<ChatInMemory>();
         services.AddLogging();
     }
+
+    //Konfigurerar authentication. Hämtar hemliga nyckeln på olika ställen beroende på environment. 
     public static void ConfigureAuthentication(this IServiceCollection services, IConfiguration config)
     {
         services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
