@@ -1,6 +1,7 @@
 ﻿using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.IdentityModel.Tokens;
 using SignalRChatServer.Infrastructure.Services;
+using SignalRChatServer.Infrastructure.Utils;
 using System.Text;
 
 namespace SignalRChatServer.API.Configurations;
@@ -12,7 +13,6 @@ public static class ServicesConfiguration
         services.AddScoped<IAuthServices, AuthServices>();
         services.AddScoped<ChatService>();
         services.AddSingleton<ChatInMemory>();
-
         services.AddLogging();
     }
     public static void ConfigureAuthentication(this IServiceCollection services)

@@ -76,7 +76,7 @@ public class ChatService
         var rawMessages = await _context.Messages
             .Include(m => m.Group)
             .Include(m => m.User)
-            .Where(m => m.Group.Name == groupName)
+            .Where(m => m.Group != null && m.Group.Name == groupName)
             .OrderBy(m => m.Timestamp)
             .ToListAsync();
         var messages = Mapper.MapToGroupMessageDto(rawMessages);

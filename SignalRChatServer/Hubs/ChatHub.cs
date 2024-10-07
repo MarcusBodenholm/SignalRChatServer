@@ -5,6 +5,7 @@ using SignalRChatServer.Infrastructure.Context;
 using SignalRChatServer.Infrastructure.DTOs;
 using SignalRChatServer.Infrastructure.Models;
 using SignalRChatServer.Infrastructure.Services;
+using SignalRChatServer.Infrastructure.Utils;
 using System.Text.Json;
 
 namespace SignalRChatServer.API.Hubs;
@@ -46,7 +47,8 @@ public class ChatHub : Hub
     {
         var user = _context.Users.SingleOrDefault(u => u.Username == userName);
         var group = _context.Groups.SingleOrDefault(g => g.Name == groupName);
-        ChatMessage chatMessage = new ChatMessage {Message = message, Group = group, User = user};
+        string encryptedMessage = EncryptionHelper.Encrypt(message);
+        ChatMessage chatMessage = new ChatMessage {Message = encryptedMessage, Group = group, User = user};
         _context.Messages.Add(chatMessage);
         await _context.SaveChangesAsync();
         await Clients.Group(groupName).SendAsync("Send");
@@ -104,13 +106,13 @@ public class ChatHub : Hub
         {
             User = user,
             Conversation = conversation,
-            Message = message,
+            Message = EncryptionHelper.Encrypt(message),
             Timestamp = DateTime.UtcNow
         };
         _context.Messages.Add(chatMessage);
         await _context.SaveChangesAsync();
 
-        await Clients.Group(conversationId.ToString()).SendAsync("ReceivePrivateMessage", new { Username = chatMessage.User.Username, message = chatMessage.Message, TimeStamp = chatMessage.Timestamp });
+        await Clients.Group(conversationId.ToString()).SendAsync("ReceivePrivateMessage", new { Username = chatMessage.User.Username, message = message, TimeStamp = chatMessage.Timestamp });
 
     }
     public async Task StartGroup(string groupName)
@@ -163,12 +165,12 @@ public class ChatHub : Hub
         }
         var chatMessage = new ChatMessage 
         { 
-            Message = message,
+            Message = EncryptionHelper.Encrypt(message),
             User = user,
             Group = group,
         };
         _context.Messages.Add(chatMessage);
-        var chatMessageDto = new GroupMessageDto { Message = chatMessage.Message, Room = chatMessage.Group.Name, Username = chatMessage.User.Username, TimeStamp = chatMessage.Timestamp };
+        var chatMessageDto = new GroupMessageDto { Message = message, Room = chatMessage.Group.Name, Username = chatMessage.User.Username, TimeStamp = chatMessage.Timestamp };
         await _context.SaveChangesAsync();
         await Clients.Group(groupName).SendAsync("ReceiveGroupMessage", chatMessageDto);
 
@@ -189,12 +191,7 @@ public class ChatHub : Hub
     }
     public async Task SendGroupDetails(string group)
     {
-        var rawMessages = _context.Messages.Include(m => m.Group)
-            .Include(m => m.User)
-            .Where(m => m.Group != null && m.Group.Name == group)
-            .OrderBy(m => m.Timestamp)
-            .ToList();
-        var messages = Mapper.MapToGroupMessageDto(rawMessages);
+        var messages = await _chatService.GetGroupMessages(group);
         var groupUsers = await _chatService.GetGroupUsers(group);
         await Clients.Caller.SendAsync("SwitchGroupInfo", new { messages, groupUsers });
     }
