@@ -15,11 +15,15 @@ public class Program
         // Add services to the container.
         builder.Services.AddSignalR();
         builder.Services.AddControllers();
-        builder.Services.ConfigureAuthentication();
+        builder.Services.ConfigureAuthentication(builder.Configuration);
         // Learn more about configuring Swagger/OpenAPI at https://aka.ms/aspnetcore/swashbuckle
         builder.Services.AddDbContext<ChatContext>(options =>
         {
+#if DEBUG 
             options.UseSqlServer(builder.Configuration["ChatDbConnection"]);
+#else
+            options.UseSqlServer(Environment.GetEnvironmentVariable("ChatDbConnection"));
+#endif
         });
         builder.Services.AddEndpointsApiExplorer();
         builder.Services.AddSwaggerGen();

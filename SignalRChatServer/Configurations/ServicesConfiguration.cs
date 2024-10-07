@@ -15,7 +15,7 @@ public static class ServicesConfiguration
         services.AddSingleton<ChatInMemory>();
         services.AddLogging();
     }
-    public static void ConfigureAuthentication(this IServiceCollection services)
+    public static void ConfigureAuthentication(this IServiceCollection services, IConfiguration config)
     {
         services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
             .AddJwtBearer(options =>
@@ -26,7 +26,13 @@ public static class ServicesConfiguration
                     ValidateAudience = false,
                     ValidateLifetime = true,
                     ValidateIssuerSigningKey = true,
-                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes("bf14f4120a0c4ecc52aece519365abc823c35d8961f01f72c5f8b22023d990ca"))
+#if DEBUG
+                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(config["SecretKey"]))
+
+#else
+                    IssuerSigningKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(Environment.GetEnvironmentVariable("SecretKey")))
+
+#endif
                 };
                 options.Events = new JwtBearerEvents
                 {
