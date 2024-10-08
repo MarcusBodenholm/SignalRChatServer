@@ -12,7 +12,7 @@ public static class ServicesConfiguration
     public static void ConfigureServices(this IServiceCollection services)
     {
         services.AddScoped<IAuthServices, AuthServices>();
-        services.AddScoped<ChatService>();
+        services.AddScoped<IChatService, ChatService>();
         services.AddSingleton<ChatInMemory>();
         services.AddLogging();
     }

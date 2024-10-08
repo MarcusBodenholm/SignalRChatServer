@@ -1,29 +1,29 @@
 ﻿using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.SignalR;
-using Microsoft.EntityFrameworkCore;
 using SignalRChatServer.Infrastructure.Context;
-using SignalRChatServer.Infrastructure.DTOs;
-using SignalRChatServer.Infrastructure.Models;
 using SignalRChatServer.Infrastructure.Services;
-using SignalRChatServer.Infrastructure.Utils;
-using System.Text.Json;
+using SignalRChatServer.Infrastructure.Records;
 
 namespace SignalRChatServer.API.Hubs;
 [Authorize]
 public class ChatHub : Hub
 {
-    private readonly ChatContext _context;
-    private readonly ChatService _chatService;
+    private readonly IChatService _chatService;
     private readonly ChatInMemory _chatInMemory;
     private readonly ILogger<ChatHub> _logger;
 
-    public ChatHub(ChatContext context, ChatService chatService, ChatInMemory chatInMemory, ILogger<ChatHub> logger)
+    public ChatHub(IChatService chatService, ChatInMemory chatInMemory, ILogger<ChatHub> logger)
     {
-        _context = context;
         _chatService = chatService;
         _chatInMemory = chatInMemory;
         _logger = logger;
     }
+    public async Task SendMessage(string message)
+    {
+        var userName = Context.User?.Identity?.Name;
+        await Clients.Caller.SendAsync("ReceiveMessage", $"{userName}: {message}");
+    }
+
     #region ConnectionHandling
     //Hanterar vad som ska ske när en användare ansluter till hubben. 
     public override async Task OnConnectedAsync()
@@ -74,43 +74,28 @@ public class ChatHub : Hub
     {
         var currentUser = Context.User?.Identity?.Name;
         _logger.LogInformation($"{currentUser} starts private chat with {target}");
-        var targetUser = await _context.Users.SingleOrDefaultAsync(u => u.Username == target);
-        if (targetUser == null)
+        var result = await _chatService.StartPrivateChat(target, currentUser);
+        if (result.Success == false || result.Payload == null || result.ConversationId == null)
         {
-            _logger.LogInformation($"{target} could not be found.");
-            await Clients.Caller.SendAsync("ReceiveError", "System", "Target user does not exist0");
+            _logger.LogInformation($"SendPrivateMessage failed due to {result.Message}.");
+            await Clients.Caller.SendAsync("ReceiveError", "System", $"SendPrivateMessage failed due to {result.Message}.");
             return;
+
         }
-        var conversation = _context.Conversations.SingleOrDefault(c => (c.Participant1 == currentUser && c.Participant2 == target) || (c.Participant1 == target && c.Participant2 == currentUser));
-        if (conversation == null)
-        {
-            //Om det inte redan finns en chat mellan användarna, skapa en och spara den. 
-            conversation = new Conversation { Participant1 = currentUser, Participant2 = target };
-            _context.Conversations.Add(conversation);
-            await _context.SaveChangesAsync();
-        }
-        //Hämta alla meddelanden i rå form. 
-        var rawMessages = await _context.Messages.Include(m => m.User).Include(m => m.Conversation)
-            .Where(m => m.Conversation != null && m.Conversation.Id == conversation.Id)
-            .OrderBy(m => m.Timestamp)
-            .ToListAsync();
-        //Mappa meddelanden till dto. Där sker även dekrypteringen.
-        var messages = Mapper.MapToPrivateMessageDto(rawMessages);
-        //Skapa objektet med all data för båda användarna. 
-        var payload = new {messages, id = conversation.Id, participant1 = conversation.Participant1, participant2 = conversation.Participant2};
         //Lägg till första användaren till en ny grupp för att underlätta att skicka meddelanden till den privata chatten. 
-        await Groups.AddToGroupAsync(Context.ConnectionId, conversation.Id.ToString());
+        string conversationId = result.ConversationId.ToString()!;
+        await Groups.AddToGroupAsync(Context.ConnectionId, conversationId);
         //Hämta connection id för den andra användaren. 
         var targetConnId = _chatInMemory.GetConnectionIdForUser(target);
         if (targetConnId != null)
         {
             //Lägg till andra användaren till en ny grupp för att underlätta att skicka meddelanden till den privata chatten. 
 
-            await Groups.AddToGroupAsync(targetConnId, conversation.Id.ToString());
+            await Groups.AddToGroupAsync(targetConnId, conversationId);
         }
         //Skicka objektet med all data kring chatten. 
-        await Clients.Caller.SendAsync("OpenPrivateChat", payload);
-        await Clients.Group(target).SendAsync("OpenPrivateChat", payload);
+        await Clients.Caller.SendAsync("OpenPrivateChat", result.Payload);
+        await Clients.Group(target).SendAsync("OpenPrivateChat", result.Payload);
         _logger.LogInformation("Private chat successfully established.");
     }
     //Hanterar när en användare vill skicka ett meddelande i en privat chatt
@@ -118,33 +103,16 @@ public class ChatHub : Hub
     {
         var currentUser = Context.User?.Identity?.Name;
         _logger.LogInformation($"{currentUser} sends a message in conversationid {conversationId}.");
-        var user = await _context.Users.SingleOrDefaultAsync(u => u.Username == currentUser);
-        //Hämtar den existerande privata chatten
-        var conversation = await _context.Conversations
-            .Include(c => c.ChatMessages)
-            .Where(c => c.Id == conversationId)
-            .SingleOrDefaultAsync();
-        if (conversation == null || user == null)
+        var result = await _chatService.SendPrivateMessage(message, conversationId, currentUser);
+        if (result.Success == false || result.ChatMessage == null)
         {
-            _logger.LogInformation($"No conversation wiht conversationid {conversationId}");
-            await Clients.Caller.SendAsync("ReceiveError", "System", "Target user does not exist");
+            _logger.LogInformation($"SendPrivateMessage failed due to {result.Message}.");
+            await Clients.Caller.SendAsync("ReceiveError", "System", $"SendPrivateMessage failed due to {result.Message}.");
             return;
 
         }
-        //Skapar ett nytt chattmeddelande. Meddelandetexten krypteras. 
-        var sanitizedMessage = HtmlSanitizer.Sanitize(message);
-        var chatMessage = new ChatMessage()
-        {
-            User = user,
-            Conversation = conversation,
-            Message = EncryptionHelper.Encrypt(sanitizedMessage),
-            Timestamp = DateTime.UtcNow
-        };
-        _context.Messages.Add(chatMessage);
-        await _context.SaveChangesAsync();
-
         //Skickar det nya meddelandet till medlemmarna i den privata chatten. 
-        await Clients.Group(conversationId.ToString()).SendAsync("ReceivePrivateMessage", new { Username = chatMessage.User.Username, message = sanitizedMessage, TimeStamp = chatMessage.Timestamp });
+        await Clients.Group(conversationId.ToString()).SendAsync("ReceivePrivateMessage", new { Username = result.ChatMessage.User.Username, message = result.PrivateMessage, TimeStamp = result.ChatMessage.Timestamp });
         _logger.LogInformation($"Private message sent successfully in conversation {conversationId}");
 
     }
@@ -158,46 +126,34 @@ public class ChatHub : Hub
     public async Task StartGroup(string groupName)
     {
 
-        var groupExists = await _context.Groups.SingleOrDefaultAsync(g => g.Name == groupName);
         var currentUser = Context.User?.Identity?.Name;
         _logger.LogInformation($"{currentUser} tries to create a new group");
-        var user = await _context.Users.SingleOrDefaultAsync(u => u.Username == currentUser);
-        if (groupExists != null || currentUser == null || user == null)
+        var result = await _chatService.StartGroup(groupName, currentUser);
+
+        if (result.Success == false)
         {
-            _logger.LogInformation($"Failed creating new group: group by that name already exists.");
-            await Clients.Caller.SendAsync("ReceiveError", "System", "Group with that name already exists.");
+            _logger.LogInformation($"StartGroup failed due to {result.Message}.");
+            await Clients.Caller.SendAsync("ReceiveError", "System", result.Message);
             return;
+
         }
-        var group = new Group { Name = groupName, Owner = currentUser };
-        group.Users.Add(user);
-        _context.Groups.Add(group);
-        await _context.SaveChangesAsync();
         _logger.LogInformation($"User {currentUser} has successfully created a new group called {groupName}");
         
     }
-    //Hanterar när en användare till lägga till en annan användare i en grupp. 
+    //Hanterar när en användare till lägga till en annan användare i en grupp
     public async Task AddUserToGroup(string groupName, string username)
     {
-        var group = await _context.Groups.Include(g => g.Users).SingleOrDefaultAsync(g => g.Name == groupName);
         var currentUser = Context.User?.Identity?.Name;
-        var userToAdd = await _context.Users.SingleOrDefaultAsync(u => u.Username == username);
         _logger.LogInformation($"{currentUser} is trying to add {username} to group {groupName}.");
-        if (group == null || userToAdd == null)
+        var result = await _chatService.AddUserToGroup(groupName, username, currentUser);
+        if (result.Success == false || result.Group == null)
         {
-            _logger.LogInformation("Failed to add as either the user or the group does not exist.");
-            await Clients.Caller.SendAsync("ReceiveError", "System", "Either the group or the user does not exist.");
+            _logger.LogInformation($"AddUserToGroup failed due to {result.Message}.");
+            await Clients.Caller.SendAsync("ReceiveError", "System", result.Message);
             return;
         }
-        if (group.Owner != currentUser)
-        {
-            _logger.LogInformation("Failed to add user as only the owner of the group can add new users.");
-            await Clients.Caller.SendAsync("ReceiveError", "System", "Only the owner can add new users.");
-            return;
-        }
-        group.Users.Add(userToAdd);
-        await _context.SaveChangesAsync();
         await SendGroupMessage($"{currentUser} has added {username} to the room.", groupName);
-        await Clients.Group(username).SendAsync("ReceiveGroup", new {name = group.Name, owner = group.Owner });
+        await Clients.Group(username).SendAsync("ReceiveGroup", new {name = result.Group.Name, owner = result.Group.Owner });
         await UpdateListOfUsersForGroupClients(groupName);
         _logger.LogInformation($"{currentUser} has successfully added {username} to group {groupName}.");
 
@@ -206,29 +162,17 @@ public class ChatHub : Hub
     public async Task SendGroupMessage(string message, string groupName)
     {
         var username = Context.User?.Identity?.Name;
-        var user = await _context.Users.SingleOrDefaultAsync(u => u.Username == username);
-        var group = await _context.Groups.SingleOrDefaultAsync(g => g.Name == groupName);
         _logger.LogInformation($"{username} tries to send a message to group {groupName}");
-        if (user == null || group == null)
+        var result = await _chatService.SaveGroupMessage(message, groupName, username);
+        if (result.Success == false)
         {
-            _logger.LogInformation($"Failed as the indicated group {groupName} does not exist.");
-            await Clients.Caller.SendAsync("ReceiveError", "System", "The indicated group does not exist.");
+            _logger.LogInformation($"SendGroupMessage failed due to {result.Message}.");
+            await Clients.Caller.SendAsync("ReceiveError", "System", "Failed to send group message.");
             return;
-        }
-        //Saniterar innehållet för att motverka XSS
-        var sanitizedMessage = HtmlSanitizer.Sanitize(message);
 
-        var chatMessage = new ChatMessage 
-        { 
-            Message = EncryptionHelper.Encrypt(sanitizedMessage),
-            User = user,
-            Group = group,
-        };
-        _context.Messages.Add(chatMessage);
-        var chatMessageDto = new GroupMessageDto { Message = sanitizedMessage, Room = chatMessage.Group.Name, Username = chatMessage.User.Username, TimeStamp = chatMessage.Timestamp };
-        await _context.SaveChangesAsync();
+        }
         //Skickar meddelandet till gruppen ifråga. 
-        await Clients.Group(groupName).SendAsync("ReceiveGroupMessage", chatMessageDto);
+        await Clients.Group(groupName).SendAsync("ReceiveGroupMessage", result.Dto);
         _logger.LogInformation($"{username} has successfully sent a message to group {groupName}");
     }
     //Hanterar när användaren vill byta från en grupp till en annan. 
@@ -270,33 +214,17 @@ public class ChatHub : Hub
     public async Task DeleteGroup(string groupName)
     {
         var currentUser = Context.User?.Identity?.Name;
-        var group = await _context.Groups.Include(g => g.Users).SingleOrDefaultAsync(g => g.Name == groupName);
         _logger.LogInformation($"User {currentUser} is trying to delete group {groupName}");
-        if (currentUser == null || group == null)
+        var result = await _chatService.DeleteGroup(groupName);
+        if (result.Success == false || result.Users == null)
         {
-            _logger.LogInformation($"Delete group failed as either the user or the group does not exist.");
-            await Clients.Caller.SendAsync("ReceiveMessage", "System", "Group does not exist or...you don't.");
+            _logger.LogInformation($"Delete group failed due to {result.Message}");
+            await Clients.Caller.SendAsync("ReceiveError", "System", "Failed to delete group.");
             return;
+
         }
-        //Hämtar alla meddelanden. 
-        var messages = await _context.Messages.Include(m => m.Group).Where(m => m.Group == group).ToListAsync();
-        foreach (var message in messages)
-        {
-            //Tar bort gruppanknytningen från meddelanden. 
-            message.Group = null;
-        }
-        //Hämtar alla gruppens användare. 
-        var users = group.Users.Select(u => u.Username).ToList();
-        //Tar bort gruppanknytningen.
-        group.Users.Clear();
-        _context.Groups.Remove(group);
-        //Tar bort gruppen från databasen.
-        await _context.SaveChangesAsync();
-        foreach (var user in users)
-        {
-            //Meddelar alla användare att gruppen försvunnit och att de ska ta bort gruppen.
-            await Clients.Group(user).SendAsync("GroupGone", groupName);
-        }
+        //Meddelar alla användare att gruppen försvunnit och att de ska ta bort gruppen.
+        await Clients.Groups(result.Users).SendAsync("GroupGone", groupName);
         _logger.LogInformation($"Successfully removed group {groupName}");
     }
     #endregion
