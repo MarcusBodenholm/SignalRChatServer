@@ -1,5 +1,6 @@
 ﻿using SignalRChatServer.Infrastructure.Models;
 using SignalRChatServer.Infrastructure.Utils;
+using System.Web;
 
 namespace SignalRChatServer.Infrastructure.DTOs;
 
@@ -9,9 +10,9 @@ public static class Mapper
     {
         if (EncryptionHelper.IsBase64String(input))
         {
-            return EncryptionHelper.Decrypt(input);
+            return HttpUtility.HtmlDecode(EncryptionHelper.Decrypt(input));
         }
-        return input;
+        return HttpUtility.HtmlDecode(input);
 
     }
     public static List<GroupMessageDto> MapToGroupMessageDto(List<ChatMessage> messages)

@@ -15,10 +15,7 @@
       "launchBrowser": true,
       "launchUrl": "swagger",
       "environmentVariables": {
-        "ASPNETCORE_ENVIRONMENT": "Development",
-        "EncryptionKey": "U11QMIcy9vibJCJ8Cu82bG9HsVyoJXs3",
-        "ChatDbConnection": "Server=tcp:sql-signalrchat.database.windows.net,1433;Initial Catalog=sqldb-signalrchat;Persist Security Info=False;User ID=SqlServerAdmin;Password=zL?Pr!PRX?8!Qxp6;MultipleActiveResultSets=False;Encrypt=True;TrustServerCertificate=False;Connection Timeout=30;",
-        "SecretKey": "bf14f4120a0c4ecc52aece519365abc823c35d8961f01f72c5f8b22023d9908a"
+        "ASPNETCORE_ENVIRONMENT": "Development"
       },
       "dotnetRunMessages": true,
       "applicationUrl": "https://localhost:7174;http://localhost:5065"

@@ -31,11 +31,19 @@ public class Program
         {
             options.AddPolicy("reactClient", builder =>
             {
+                builder.WithOrigins("https://wonderful-river-0eff73803.5.azurestaticapps.net")
+                .AllowAnyHeader()
+                .AllowAnyMethod()
+                .AllowCredentials();
+            });
+            options.AddPolicy("localClient", builder =>
+            {
                 builder.WithOrigins("http://localhost:5173")
                 .AllowAnyHeader()
                 .AllowAnyMethod()
                 .AllowCredentials();
             });
+
         });
         builder.Services.ConfigureServices();
         builder.WebHost.ConfigureKestrel(options =>

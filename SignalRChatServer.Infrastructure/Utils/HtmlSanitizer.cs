@@ -30,7 +30,6 @@ public static class HtmlSanitizer
         //Plocka bort http & https länkar. 
         var plainLinkRegex = new Regex(@"(http|https):\/\/[^\s<>]+", RegexOptions.IgnoreCase);
         input = plainLinkRegex.Replace(input, string.Empty);
-
         return HttpUtility.HtmlEncode(input);
     }
 }
